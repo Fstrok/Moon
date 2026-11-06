@@ -18,8 +18,11 @@ class CloudflareException(val url: String) : IOException("Cloudflare challenge: 
 
 class HttpError(val code: Int, val url: String) : IOException("HTTP $code")
 
-/** Действие доступно только после входа на сайт. */
-class AuthRequiredException : IOException("Нужен вход на сайт")
+/** Действие доступно только после входа на сайт (или сессия на сайте истекла). */
+class AuthRequiredException(message: String = "Нужен вход на сайт") : IOException(message)
+
+/** Страница открылась, но картинок глав на ней не нашлось. */
+class NoPagesException(val url: String) : IOException("На странице не нашлись картинки")
 
 /** Общие cookies с WebView: вход и проверка Cloudflare в WebView сразу работают в приложении. */
 class WebViewCookieJar : CookieJar {
@@ -74,30 +77,41 @@ class CloudflareInterceptor : Interceptor {
 enum class CookieMode { NORMAL, GUEST, DESKTOP, GUEST_DESKTOP }
 
 /**
- * Сетевой перехватчик: правит итоговый заголовок Cookie. Нужен, чтобы сравнить меню сайта
- * у гостя и у вошедшего и найти разделы, которые открываются только после входа.
+ * Сетевой перехватчик: правит итоговый заголовок Cookie.
+ * NORMAL — всегда мобильная вёрстка сайта (под неё написан разбор) и подтверждение 18+.
+ * GUEST — только cookies Cloudflare и вёрстки, без сессии: так сайт видит гостя.
+ * DESKTOP — без мобильной вёрстки.
+ * Ответы на GUEST/DESKTOP-запросы не сохраняют cookies (см. [ReadOnlyCookieJar]), чтобы не портить сессию.
  */
 class CookieModeInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val req = chain.request()
         val mode = req.tag(CookieMode::class.java) ?: CookieMode.NORMAL
-        if (mode == CookieMode.NORMAL) return chain.proceed(req)
-        val cookie = req.header("Cookie") ?: return chain.proceed(req)
-        val kept = cookie.split(';').map { it.trim() }.filter { c ->
-            val name = c.substringBefore('=')
-            val guestOk = !name.startsWith("fusion")
-            val desktopOk = name != "nm_mobile"
-            when (mode) {
-                CookieMode.GUEST -> guestOk
-                CookieMode.DESKTOP -> desktopOk
-                CookieMode.GUEST_DESKTOP -> guestOk && desktopOk
-                CookieMode.NORMAL -> true
-            }
+        val pairs = req.header("Cookie").orEmpty().split(';').map { it.trim() }.filter { '=' in it }
+            .map { it.substringBefore('=') to it.substringAfter('=') }
+        val guest = mode == CookieMode.GUEST || mode == CookieMode.GUEST_DESKTOP
+        val desktop = mode == CookieMode.DESKTOP || mode == CookieMode.GUEST_DESKTOP
+        val kept = LinkedHashMap<String, String>()
+        pairs.forEach { (k, v) ->
+            if (k in FORCED) return@forEach
+            if (guest && !(k == "cf_clearance" || k.startsWith("__cf"))) return@forEach
+            kept[k] = v
         }
-        val b = req.newBuilder()
-        if (kept.isEmpty()) b.removeHeader("Cookie") else b.header("Cookie", kept.joinToString("; "))
+        kept["NMfYa"] = "1"
+        if (!desktop) kept["nm_mobile"] = "1"
+        val b = req.newBuilder().header("Cookie", kept.entries.joinToString("; ") { "${it.key}=${it.value}" })
         return chain.proceed(b.build())
     }
+
+    private companion object {
+        val FORCED = setOf("NMfYa", "nm_mobile")
+    }
+}
+
+/** Читает cookies, но ничего не сохраняет: для служебных запросов «как гость» / «десктоп». */
+class ReadOnlyCookieJar(private val inner: CookieJar) : CookieJar {
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {}
+    override fun loadForRequest(url: HttpUrl): List<Cookie> = inner.loadForRequest(url)
 }
 
 suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->

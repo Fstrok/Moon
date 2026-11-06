@@ -61,7 +61,6 @@ import app.moon.ui.screens.SearchScreen
 import app.moon.ui.screens.SettingsScreen
 import app.moon.ui.screens.TagsScreen
 import app.moon.ui.web.AutoLoginHost
-import app.moon.ui.web.SiteActionHostIfNeeded
 import app.moon.ui.web.WebScreen
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
@@ -159,7 +158,6 @@ fun AppRoot(deepLink: String?, onDeepLinkHandled: () -> Unit) {
                 }
             }
             AutoLoginHost()
-            SiteActionHostIfNeeded()
             if (locked) LockScreen()
         }
     }

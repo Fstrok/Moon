@@ -103,6 +103,7 @@ fun SectionsScreen() {
             val groups = listOf(
                 SectionKind.LOGIN_ONLY to "Только после входа",
                 SectionKind.LISTING to "Списки манги",
+                SectionKind.DIRECTORY to "Указатели",
                 SectionKind.OTHER to "Другие ссылки сайта",
             )
             groups.forEach { (kind, title) ->
@@ -224,17 +225,34 @@ class DiagViewModel : ViewModel() {
         }
         val bm = App.categories.value.bookmarksUrl
         if (bm != null) {
-            part("Закладки сайта: $bm") {
+            part("Избранное сайта: $bm") {
                 val doc = a.document(a.abs(bm))
                 val page = NudeMoonParser.parseListAny(doc)
                 appendLine("тайтлов на 1-й странице: ${page.items.size} · далее: ${page.nextUrl}")
-                page.items.take(5).forEach { appendLine("  ${it.title} -> ${it.url}") }
-                if (page.items.isEmpty()) appendLine(doc.body().html().replace(Regex("\\s+"), " ").take(3000))
+                page.items.take(3).forEach { appendLine("  ${it.title} -> ${it.url}") }
+                val all = runCatching { a.favorites(bm) }.getOrNull()
+                appendLine("всего по всем страницам: ${all?.items?.size} · ссылок удаления: ${all?.removeLinks?.size}")
+                all?.removeLinks?.entries?.take(2)?.forEach { appendLine("  удалить ${it.key}: ${it.value}") }
+                appendLine("--- ссылки did= и формы ---")
+                doc.select("a[href*=did=]").take(6).forEach { appendLine("  " + it.outerHtml().replace(Regex("\\s+"), " ").take(200)) }
+                doc.select("form").take(3).forEach { f ->
+                    appendLine("  form action=${f.attr("action")} method=${f.attr("method")} inputs=" +
+                        f.select("input,button,select").joinToString { i -> i.attr("type") + ":" + i.attr("name") + "=" + i.attr("value").take(20) })
+                }
+                appendLine("--- первые блоки ---")
+                appendLine(doc.select("a[href~=--.+\\.html]").firstOrNull()?.parents()?.getOrNull(2)?.outerHtml()
+                    ?.replace(Regex("\\s+"), " ")?.take(1500).orEmpty())
+                appendLine("пагинация: " + doc.select("a[href*=rowstart], a:matchesOwn(^\\s*(>|»|\\d+)\\s*$)").take(8).joinToString { it.text() + "→" + it.attr("href") })
             }
+        }
+        part("Последние ошибки") {
+            val log = a.errorLog.toList()
+            if (log.isEmpty()) appendLine("нет")
+            log.forEach { appendLine("  $it") }
         }
         val sync = App.siteFavorites.state.value
         appendLine()
-        appendLine("Синхронизация: вкл=${sync.enabled} на сайте=${sync.siteCount} ждут +${sync.pendingAdd.size}/-${sync.pendingRemove.size} статус=${sync.status}")
+        appendLine("Синхронизация: вкл=${sync.enabled} на сайте=${sync.siteCount} ждут +${sync.pendingAdd.size}/-${sync.pendingRemove.size} удаление=${sync.removeHint} статус=${sync.status}")
         val sample = App.library.value.favorites.firstOrNull()?.manga?.url
             ?: runCatching { a.catalog(app.moon.data.Sort.DATE, 0).items.firstOrNull()?.url }.getOrNull()
         if (sample != null) {

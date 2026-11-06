@@ -36,10 +36,21 @@ object NudeMoonParser {
         return MangaPage(items, next != null, next)
     }
 
+    private val ROWSTART = Regex("""rowstart=(\d+)""")
+    private val NEXT_WORDS = setOf(">", "»", "›", "→", "далее", "следующая", "след.", "вперёд", "вперед")
+
     fun nextPageUrl(doc: Document): String? {
         val links = doc.select(NEXT)
         val exact = links.firstOrNull { it.text().trim() == ">" } ?: links.firstOrNull { !it.text().contains(">>") }
-        return exact?.absUrl("href")?.takeIf { it.isNotBlank() }
+        exact?.absUrl("href")?.takeIf { it.isNotBlank() }?.let { return it }
+        // пагинация PHP-Fusion: ближайшая ссылка с rowstart больше текущего
+        val cur = ROWSTART.find(doc.location())?.groupValues?.get(1)?.toIntOrNull() ?: 0
+        doc.select("a[href*=rowstart=]")
+            .mapNotNull { a -> a.absUrl("href").takeIf { it.isNotBlank() }?.let { h -> ROWSTART.find(h)?.groupValues?.get(1)?.toIntOrNull()?.let { it to h } } }
+            .filter { it.first > cur }
+            .minByOrNull { it.first }
+            ?.let { return it.second }
+        return doc.select("a[href]").firstOrNull { it.text().trim().lowercase() in NEXT_WORDS }?.absUrl("href")?.ifBlank { null }
     }
 
     fun parseItem(el: Element): MangaItem? {
@@ -134,13 +145,17 @@ object NudeMoonParser {
             .toFloatOrNull() ?: -1f
     }
 
+    private val NOT_PAGE = Regex("""/ico/|avatar|logo|smile|banner|/images/|counter|button""", RegexOption.IGNORE_CASE)
+
     fun parsePages(doc: Document): List<String> {
         val main = doc.select("""img[title~=.+][loading="lazy"]""").mapNotNull { imageSrc(it) }
         if (main.isNotEmpty()) return main.distinct()
-        // запасной вариант: ленивые картинки внутри контента
-        val lazy = doc.select("img[data-src]").map { it.absUrl("data-src") }
-            .filter { it.isNotBlank() && IMG_EXT.containsMatchIn(it) && !it.contains("/images/") }
-        if (lazy.size >= 2) return lazy.distinct()
+        // как в Kotatsu: все ленивые картинки страницы, кроме оформления
+        val lazy = doc.select("img[data-src], img[data-original]")
+            .filter { el -> el.parents().none { p -> p.tagName() in setOf("header", "nav", "footer") || p.hasClass("tag-links") } }
+            .mapNotNull { imageSrc(it) }
+            .filter { !NOT_PAGE.containsMatchIn(it) }
+        if (lazy.isNotEmpty()) return lazy.distinct()
         // старый формат: массив картинок в <script>
         val fromScripts = doc.select("script").flatMap { s ->
             val d = s.data()
@@ -152,7 +167,7 @@ object NudeMoonParser {
     /** Служебные ссылки: никогда не разделы. */
     private val JUNK = listOf(
         "login", "logout", "register", "setuser", "lostpassword", "password", "rss", "print.php",
-        "javascript:", "mailto:", "/rules", "contact", "faq",
+        "javascript:", "mailto:", "/rules", "contact", "faq", "redi.php",
     )
 
     /** Ссылки аккаунта: появляются после входа, но это не разделы с мангой. */
@@ -163,7 +178,38 @@ object NudeMoonParser {
     )
     private val SORT_KEYS = setOf("date", "views", "like", "com", "pages")
     const val MENU_CONTAINER = "nav, header, [id*=menu], [class*=menu], [id*=nav], [class*=nav], [class*=header], [id*=header]"
-    private val SPECIFIC_PAGE = Regex("""^/(tags?|mangaka|perevod)/[^/]+""")
+    private val SPECIFIC_PAGE = Regex("""^/(tags?|mangaka|perevod|seria|group)/[^/?]+""")
+    private val DIRECTORY = Regex("""^/(seria|mangaka|group|perevod)/?$""")
+    private val WEB_ONLY = Regex("""comment|guestbook|order""", RegexOption.IGNORE_CASE)
+
+    /** Указатель: «По аниме и комиксам», «По авторам», «По группам и циклам», «По переводчикам». */
+    fun isDirectoryUrl(url: String): Boolean = DIRECTORY.matches(url.substringBefore('?').let { p -> p.toHttpUrlOrNull()?.encodedPath ?: p })
+
+    /** Раздел, который лучше показывать страницей сайта (отзывы, гостевая, заказы). */
+    fun isWebOnly(url: String): Boolean = WEB_ONLY.containsMatchIn(url.substringBefore('?'))
+
+    data class Directory(val entries: List<Link>, val letters: List<Link>)
+
+    /** Разбор указателя: ссылки на /seria/<имя> и т.п. + алфавит (?letter=). */
+    fun parseDirectory(doc: Document): Directory {
+        val path = doc.location().toHttpUrlOrNull()?.encodedPath ?: return Directory(emptyList(), emptyList())
+        val prefix = "/" + path.trim('/').substringBefore('/') + "/"
+        val entries = LinkedHashMap<String, Link>()
+        val letters = LinkedHashMap<String, Link>()
+        for (a in doc.select("a[href]")) {
+            val u = a.absUrl("href").toHttpUrlOrNull() ?: continue
+            val text = a.text().trim().ifEmpty { continue }
+            val p = u.encodedPath
+            if (!p.startsWith(prefix)) continue
+            if (u.queryParameter("letter") != null) {
+                val key = u.encodedPath + "?" + u.encodedQuery
+                letters.putIfAbsent(key, Link(text, key))
+            } else if (p.length > prefix.length) {
+                entries.putIfAbsent(p, Link(text, p))
+            }
+        }
+        return Directory(entries.values.toList(), letters.values.toList())
+    }
     private val MANGA_PATH = Regex("""/[^/]*--[^/]+\.html$""")
     val BOOKMARKS_RE = Regex("""закладк|избранн|bookmark|favou?rit""", RegexOption.IGNORE_CASE)
 
@@ -182,6 +228,28 @@ object NudeMoonParser {
                 el.attr("href") + " " + el.attr("onclick") + " " + el.id() + " " + el.className()
             BOOKMARKS_RE.containsMatchIn(hay) && el.parents().none { it.hasClass("tag-links") }
         }.take(12).map { it.outerHtml().replace(Regex("\\s+"), " ").take(400) }
+
+    private val ID_RE = Regex("""^/(\d+)""")
+    private val DID_RE = Regex("""did=(\d+)""")
+
+    /** Номер тайтла из пути /31041--name.html. */
+    fun mangaId(pathOrUrl: String): String? {
+        val p = pathOrUrl.toHttpUrlOrNull()?.encodedPath ?: pathOrUrl
+        return ID_RE.find(p)?.groupValues?.get(1)
+    }
+
+    /** Ссылки удаления из избранного на странице избранного: id → url (всё с did=ID, кроме «add»). */
+    fun favoriteRemoveLinks(doc: Document): Map<String, String> {
+        val out = HashMap<String, String>()
+        for (a in doc.select("a[href*=did=]")) {
+            val href = a.absUrl("href").ifBlank { continue }
+            val q = href.substringAfter('?', "")
+            if (q.split('&').any { it == "add" || it.startsWith("add=") }) continue
+            val id = DID_RE.find(href)?.groupValues?.get(1) ?: continue
+            out.putIfAbsent(id, href)
+        }
+        return out
+    }
 
     fun isMangaPath(path: String): Boolean = MANGA_PATH.containsMatchIn(path)
 
@@ -219,8 +287,8 @@ object NudeMoonParser {
             if (p.trimEnd('/') == "/tags") continue
             val low = href.lowercase()
             if (JUNK.any { low.contains(it) }) continue
-            // каталог с одной лишь сортировкой — это вкладка «Все»
-            if (p.startsWith("/all_manga")) {
+            // каталог с одной лишь сортировкой — это вкладка «Все» (а /all_manga/0 «Архив» — отдельный раздел)
+            if (p.trimEnd('/') == "/all_manga") {
                 val keys = u.encodedQuery?.split('&')?.map { it.substringBefore('=') }?.filterNot { it == "rowstart" }.orEmpty()
                 if (keys.all { it in SORT_KEYS }) continue
             }
@@ -272,6 +340,9 @@ object NudeMoonParser {
     fun username(doc: Document): String? =
         doc.getElementsContainingOwnText("Профиль").firstOrNull { it.hasAttr("href") }
             ?.attr("href")?.trimEnd('/')?.substringAfterLast('/')?.substringAfterLast('=')?.ifBlank { null }
+
+    /** Обычная (десктопная) вёрстка: в ней есть ссылка «Мобильная версия сайта». */
+    fun isDesktopLayout(doc: Document): Boolean = doc.selectFirst("a[href*='redi.php?mobile']") != null
 
     /** Абсолютная ссылка «Профиль» или null. */
     fun profileUrl(doc: Document): String? =

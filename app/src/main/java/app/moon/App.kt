@@ -16,7 +16,6 @@ import app.moon.data.store.Categories
 import app.moon.data.store.CategoriesData
 import app.moon.data.store.SiteFavorites
 import app.moon.data.store.SyncData
-import app.moon.data.site.SiteActions
 import app.moon.data.store.JsonStore
 import app.moon.data.store.Library
 import app.moon.data.store.LibraryData
@@ -63,7 +62,6 @@ object App {
         private set
     lateinit var categories: Categories
         private set
-    val siteActions = SiteActions()
     lateinit var siteFavorites: SiteFavorites
         private set
 
@@ -104,7 +102,13 @@ object App {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(40, TimeUnit.SECONDS)
             .build()
-        api = NudeMoonApi(client, base) { session.check() }
+        api = NudeMoonApi(client, base, { session.check() }) {
+            // синхронно: следующий же вызов должен видеть, что входа нет
+            if (session.check()) {
+                session.markExpired()
+                toast("Сессия на сайте истекла — войди снова")
+            }
+        }
         downloads = Downloads(File(context.filesDir, "downloads"), { api }, { client }, scope)
         vault = CredentialVault(context)
         lock = AppLock({ settings.value.lockEnabled }, { settings.value.lockDelaySec })
@@ -120,7 +124,6 @@ object App {
             { api },
             { categories.value.bookmarksUrl },
             { session.check() },
-            siteActions,
             scope,
             ::toast,
         )

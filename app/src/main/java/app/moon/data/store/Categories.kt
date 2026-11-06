@@ -22,6 +22,9 @@ enum class SectionKind {
     /** Обычный список манги сайта. */
     LISTING,
 
+    /** Указатель (по аниме, авторам, группам, переводчикам) — свой экран со списком и алфавитом. */
+    DIRECTORY,
+
     /** Появляется в меню только после входа — показываем всегда, какой бы ни была вёрстка. */
     LOGIN_ONLY,
 
@@ -49,9 +52,12 @@ data class CategoriesData(
     val bookmarksUrl: String? = null,
     val error: String? = null,
 ) {
-    /** Вкладки каталога. */
+    /** Вкладки каталога. Избранное сайта не дублируем — оно во вкладке «Избранное» приложения. */
     val tabs: List<Section>
-        get() = sections.filter { (it.kind != SectionKind.OTHER || it.url in pinned) && it.url !in hidden }
+        get() = sections.filter {
+            val auto = it.kind != SectionKind.OTHER && it.url != bookmarksUrl
+            (auto || it.url in pinned) && it.url !in hidden
+        }
 }
 
 /**
@@ -109,21 +115,31 @@ class Categories(
     private suspend fun menu(a: NudeMoonApi, mode: CookieMode): List<Link> =
         NudeMoonParser.parseMenuLinks(a.document(a.base + "/", mode))
 
+    private fun dirKey(url: String): String =
+        if (NudeMoonParser.isDirectoryUrl(url)) "dir:" + url.substringBefore('?').trimEnd('/') else url
+
     private suspend fun discover() {
         val a = api()
         val base = a.base
         val auth = loggedIn()
         val home = a.document("$base/")
-        val desktop = runCatching { NudeMoonParser.parseMenuLinks(a.document("$base/", CookieMode.DESKTOP)) }.getOrDefault(emptyList())
-        val candidates = (NudeMoonParser.parseMenuLinks(home) + desktop)
-            .distinctBy { it.url }
+        val mobile = NudeMoonParser.parseMenuLinks(home)
+        val desktop = runCatching { menu(a, CookieMode.DESKTOP) }.getOrDefault(emptyList())
+        val candidates = (mobile + desktop)
+            .distinctBy { dirKey(it.url) }
             .filterNot { NudeMoonParser.isAccountLink(it) && !NudeMoonParser.isBookmarksLink(it) }
 
-        // меню гостя: всё, чего в нём нет, — разделы «только после входа»
-        val guestUrls: Set<String>? = if (!auth) null else runCatching {
-            (menu(a, CookieMode.GUEST) + runCatching { menu(a, CookieMode.GUEST_DESKTOP) }.getOrDefault(emptyList()))
-                .mapTo(HashSet()) { it.url }
-        }.getOrNull()
+        // разделы «только после входа»: сравниваем с гостем в той же вёрстке (мобильная с мобильной, обычная с обычной)
+        val loginOnly: Set<String> = if (!auth) emptySet() else buildSet {
+            runCatching { menu(a, CookieMode.GUEST) }.getOrNull()?.let { g ->
+                val gu = g.mapTo(HashSet()) { dirKey(it.url) }
+                mobile.filter { dirKey(it.url) !in gu }.forEach { add(dirKey(it.url)) }
+            }
+            if (desktop.isNotEmpty()) runCatching { menu(a, CookieMode.GUEST_DESKTOP) }.getOrNull()?.let { g ->
+                val gu = g.mapTo(HashSet()) { dirKey(it.url) }
+                desktop.filter { dirKey(it.url) !in gu }.forEach { add(dirKey(it.url)) }
+            }
+        }
 
         val old = store.value
         val oldByUrl = old.sections.associateBy { it.url }
@@ -133,16 +149,17 @@ class Categories(
             toCheck.map { l ->
                 async {
                     sem.withPermit {
-                        val loginOnly = guestUrls != null && l.url !in guestUrls
+                        val isLoginOnly = dirKey(l.url) in loginOnly
+                        if (NudeMoonParser.isDirectoryUrl(l.url)) return@withPermit Section(l.name, l.url, SectionKind.DIRECTORY)
                         val count = try {
-                            if (loginOnly) a.listing(l.url).items.size else a.nativeCount(l.url)
+                            if (isLoginOnly) a.listing(l.url).items.size else a.nativeCount(l.url)
                         } catch (e: kotlinx.coroutines.CancellationException) {
                             throw e
                         } catch (e: Exception) {
                             null
                         }
                         val kind = when {
-                            loginOnly -> SectionKind.LOGIN_ONLY
+                            isLoginOnly -> SectionKind.LOGIN_ONLY
                             count == null -> oldByUrl[l.url]?.kind?.takeIf { it != SectionKind.LOGIN_ONLY } ?: SectionKind.OTHER
                             count >= MIN_ITEMS -> SectionKind.LISTING
                             else -> SectionKind.OTHER
@@ -188,7 +205,7 @@ class Categories(
 
     /** Показать/скрыть раздел во вкладках каталога. */
     fun setVisible(s: Section, visible: Boolean) = store.update { d ->
-        val auto = s.kind != SectionKind.OTHER
+        val auto = s.kind != SectionKind.OTHER && s.url != d.bookmarksUrl
         d.copy(
             pinned = if (visible && !auto) (d.pinned + s.url).distinct() else d.pinned - s.url,
             hidden = if (!visible && auto) (d.hidden + s.url).distinct() else d.hidden - s.url,

@@ -125,7 +125,7 @@ fun ReaderScreen(mangaUrl: String, chapterUrl: String) {
             }
             st.error != null -> Box(Modifier.fillMaxSize().statusBarsPadding(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    ErrorBox(st.error!!, { vm.open(st.chapter?.url ?: chapterUrl, false) })
+                    ErrorBox(st.error!!, { vm.open(st.chapter?.url ?: chapterUrl, false) }, siteUrl = App.api.abs(st.chapter?.url ?: chapterUrl))
                     TextButton(onClick = { nav.back() }) { Text("Назад") }
                 }
             }

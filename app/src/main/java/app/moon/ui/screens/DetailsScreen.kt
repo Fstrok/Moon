@@ -200,7 +200,7 @@ fun DetailsScreen(url: String, title: String, cover: String?) {
                 } else if (st.loading) {
                     item { LoadingBox(Modifier.height(240.dp)) }
                 }
-                st.error?.let { e -> item { ErrorBox(e, { vm.load(true) }) } }
+                st.error?.let { e -> item { ErrorBox(e, { vm.load(true) }, siteUrl = siteUrl) } }
             }
         }
     }

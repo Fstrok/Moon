@@ -26,7 +26,7 @@ jobs:
       - name: Build release APK
         env:
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.1.${{ github.run_number }}
+          VERSION_NAME: 1.2.${{ github.run_number }}
         run: |
           # versionCode = номер сборки + 100, чтобы APK из CI ставился поверх локальных сборок
           export VERSION_CODE=$((VERSION_CODE + 100))
@@ -35,13 +35,13 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Moon-1.1.${{ github.run_number }}
+          name: Moon-1.2.${{ github.run_number }}
           path: Moon-*.apk
 
       - name: Release
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.${{ github.run_number }}
-          name: Moon 1.1.${{ github.run_number }}
+          tag_name: v1.2.${{ github.run_number }}
+          name: Moon 1.2.${{ github.run_number }}
           files: Moon-*.apk

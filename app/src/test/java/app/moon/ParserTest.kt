@@ -185,6 +185,69 @@ class ParserTest {
         assertEquals(false, NudeMoonParser.pageLoggedIn(guest))
     }
 
+    /** Структура реального меню nude-moon из отчёта диагностики. */
+    @Test
+    fun realSiteMenu() {
+        val html = """
+            <html><body>
+            <ul class="sf-menu"><li class="current"><a href="/">Главная</a></li>
+             <li><a>Переводы манги</a><ul><center>
+              <li><a href="/all_manga">Все переводы</a></li><li><a href="/top">Топ переводов</a></li>
+              <li><a href="/seria/?letter=new">По аниме и комиксам</a></li><li><a href="/mangaka/?letter=new">По авторам</a></li>
+              <li><a href="/group/?letter=new">По группам и циклам</a></li><li><a href="/perevod/">По переводчикам</a></li>
+              <li><a href="/random">Случайные переводы</a></li><li><a href="/lastcomments">Последние отзывы</a></li>
+              <li><a href="/all_manga/0">Архив переводов</a></li></center></ul></li>
+             <li><a href="/order/">Стол заказов</a></li><li><a href="/faq">FAQ</a></li><li><a href="/guestbook">Гостевая</a></li></ul>
+            <a href="/user/FanStrok" class="menutext">Профиль</a><a href="/favorites" class="menutext">Избранное</a>
+            <a href="/messages" class="menutext">Сообщения</a><a href="/setuser.php?logout=yes" class="menutext">Выход</a>
+            <a href="/redi.php?mobile">Мобильная версия сайта</a>
+            </body></html>
+        """.trimIndent()
+        val doc = Jsoup.parse(html, "$base/")
+        val links = NudeMoonParser.parseMenuLinks(doc)
+        val urls = links.map { it.url }
+        assertTrue("/all_manga/0" in urls)
+        assertTrue("/all_manga" !in urls)
+        assertTrue(urls.none { "redi.php" in it || "logout" in it || "faq" in it })
+        assertTrue(NudeMoonParser.isDirectoryUrl("/seria/?letter=new"))
+        assertTrue(NudeMoonParser.isDirectoryUrl("/perevod/"))
+        assertTrue(!NudeMoonParser.isDirectoryUrl("/perevod/Team"))
+        assertTrue(NudeMoonParser.isWebOnly("/lastcomments"))
+        assertTrue(NudeMoonParser.isDesktopLayout(doc))
+        assertTrue(NudeMoonParser.isBookmarksLink(links.first { it.url == "/favorites" }))
+        assertTrue(NudeMoonParser.isAccountLink(links.first { it.url == "/messages" }))
+        assertEquals("31041", NudeMoonParser.mangaId("/31041--laserbik-brand237o-animations.html"))
+    }
+
+    @Test
+    fun directoryAndPagination() {
+        val dir = Jsoup.parse(
+            """<html><body><a href="/seria/?letter=new">Новые</a><a href="/seria/?letter=A">A</a>
+               <a href="/seria/naruto">Naruto</a><a href="/seria/bleach">Bleach</a><a href="/top">Топ</a></body></html>""",
+            "$base/seria/?letter=new",
+        )
+        val d = NudeMoonParser.parseDirectory(dir)
+        assertEquals(listOf("Naruto", "Bleach"), d.entries.map { it.name })
+        assertEquals(listOf("/seria/?letter=new", "/seria/?letter=A"), d.letters.map { it.url })
+
+        val fav = Jsoup.parse(
+            """<html><body><a href="/favorites?rowstart=0">1</a><a href="/favorites?rowstart=30">2</a><a href="/favorites?rowstart=60">3</a>
+               <a href="favorites?did=101&del">Удалить</a><a href="favorites?did=102&add">В избранное!</a></body></html>""",
+            "$base/favorites",
+        )
+        assertEquals("$base/favorites?rowstart=30", NudeMoonParser.nextPageUrl(fav))
+        val p2 = Jsoup.parse(fav.html(), "$base/favorites?rowstart=30")
+        assertEquals("$base/favorites?rowstart=60", NudeMoonParser.nextPageUrl(p2))
+        assertEquals(mapOf("101" to "$base/favorites?did=101&del"), NudeMoonParser.favoriteRemoveLinks(fav))
+    }
+
+    @Test
+    fun pagesFallbackWithoutExtension() {
+        val html = """<html><body><header><img data-src="/images/logo"></header>
+            <img data-src="/img.php?id=1"><img data-src="/img.php?id=2"><img data-src="/ico/time.png"></body></html>"""
+        assertEquals(listOf("$base/img.php?id=1", "$base/img.php?id=2"), NudeMoonParser.parsePages(Jsoup.parse(html, base)))
+    }
+
     @Test
     fun tagsAndHelpers() {
         val doc = Jsoup.parse("<form><input name='tag[]' value=' анал '><input name='tag[]' value='big breasts'><input name='q' value='z'></form>", base)

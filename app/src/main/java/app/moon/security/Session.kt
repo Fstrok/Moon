@@ -23,12 +23,21 @@ class Session(private val baseUrl: () -> String) {
         cm.getCookie(baseUrl())?.split(';')?.map { it.trim() }?.filter { '=' in it }
             ?.map { it.substringBefore('=') to it.substringAfter('=') } ?: emptyList()
 
-    /** Cookies, которые ставит сайт/парсер: 18+ подтверждение и мобильная вёрстка. */
+    /** Cookies, которые ставит сайт/парсер: 18+ подтверждение и мобильная вёрстка (и для доменных копий). */
     fun ensureDefaultCookies() {
         val base = baseUrl()
-        cm.setCookie(base, "NMfYa=1; Path=/; Max-Age=31536000")
-        cm.setCookie(base, "nm_mobile=1; Path=/; Max-Age=31536000")
+        val host = base.toHttpUrlOrNull()?.host.orEmpty()
+        for (c in listOf("NMfYa=1", "nm_mobile=1")) {
+            cm.setCookie(base, "$c; Path=/; Max-Age=31536000")
+            if (host.isNotEmpty()) cm.setCookie(base, "$c; Domain=.$host; Path=/; Max-Age=31536000")
+        }
         cm.flush()
+    }
+
+    /** Сайт показал страницу гостя, хотя cookie входа есть: сессия на сайте закончилась. */
+    fun markExpired() {
+        if (!check()) return
+        logout()
     }
 
     fun logout() {

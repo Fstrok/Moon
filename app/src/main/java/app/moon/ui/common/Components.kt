@@ -67,6 +67,7 @@ import app.moon.data.Sort
 import app.moon.data.net.AuthRequiredException
 import app.moon.data.net.CloudflareException
 import app.moon.data.net.HttpError
+import app.moon.data.net.NoPagesException
 import app.moon.security.Auth
 import coil3.compose.AsyncImage
 import java.io.IOException
@@ -239,9 +240,10 @@ fun LoadingBox(modifier: Modifier = Modifier) {
 
 fun errorText(e: Throwable): String = when (e) {
     is CloudflareException -> "Сайт просит пройти проверку Cloudflare"
-    is AuthRequiredException -> "Нужен вход на сайт"
+    is AuthRequiredException -> e.message ?: "Нужен вход на сайт"
+    is NoPagesException -> "Страница открылась, но картинок на ней не нашлось. Открой на сайте; если там читается — пришли «Диагностику»"
     is HttpError -> when (e.code) {
-        404 -> "Страница не найдена (404)"
+        404 -> "Сайт ответил 404: тайтл удалён или скрыт"
         in 500..599 -> "Сайт не отвечает (${e.code})"
         else -> "Ошибка сайта: ${e.code}"
     }
@@ -252,7 +254,7 @@ fun errorText(e: Throwable): String = when (e) {
 
 /** Ошибка с подходящим действием: повтор, проверка Cloudflare, вход. */
 @Composable
-fun ErrorBox(error: Throwable, onRetry: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun ErrorBox(error: Throwable, onRetry: () -> Unit, modifier: Modifier = Modifier, compact: Boolean = false, siteUrl: String? = null) {
     val nav = LocalNavigator.current
     val ctx = LocalContext.current
     val savedLogin by App.vault.savedLogin.collectAsState()
@@ -290,6 +292,9 @@ fun ErrorBox(error: Throwable, onRetry: () -> Unit, modifier: Modifier = Modifie
                 else -> {}
             }
             OutlinedButton(onClick = onRetry) { Text("Повторить") }
+        }
+        if (siteUrl != null && error !is CloudflareException) {
+            androidx.compose.material3.TextButton(onClick = { nav.web(siteUrl, WebMode.BROWSE) }) { Text("Открыть на сайте") }
         }
     }
 }

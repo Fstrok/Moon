@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.moon.App
 import app.moon.data.Source
+import app.moon.data.site.NudeMoonParser
 import app.moon.ui.common.MangaGrid
 import app.moon.ui.web.EmbeddedSitePage
 
@@ -19,6 +20,14 @@ import app.moon.ui.web.EmbeddedSitePage
  */
 @Composable
 fun SectionContent(url: String, title: String, modifier: Modifier = Modifier) {
+    if (NudeMoonParser.isDirectoryUrl(url)) {
+        DirectoryContent(url, modifier)
+        return
+    }
+    if (NudeMoonParser.isWebOnly(url)) {
+        EmbeddedSitePage(App.api.abs(url), modifier)
+        return
+    }
     val vm: ListingViewModel = viewModel(key = "section-$url") { ListingViewModel(Source.Url(url, title)) }
     val st by vm.state.collectAsState()
     if (st.items.isEmpty() && st.endReached && st.error == null && !st.loading) {
