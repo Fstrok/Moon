@@ -22,6 +22,8 @@ object Routes {
     const val DOWNLOADS = "downloads"
     const val SETTINGS = "settings"
     const val LOGIN = "login"
+    const val SECTIONS = "sections"
+    const val DIAG = "diag"
     const val LISTING = "listing?src={src}"
     const val DETAILS = "details?url={url}&title={title}&cover={cover}"
     const val READER = "reader?manga={manga}&chapter={chapter}"
@@ -44,6 +46,8 @@ class Navigator(val nav: NavHostController) {
     fun tags() = nav.navigate(Routes.TAGS)
     fun downloads() = nav.navigate(Routes.DOWNLOADS)
     fun settings() = nav.navigate(Routes.SETTINGS)
+    fun sections() = nav.navigate(Routes.SECTIONS)
+    fun diag() = nav.navigate(Routes.DIAG)
     fun login() = nav.navigate(Routes.LOGIN) { launchSingleTop = true }
     fun top(route: String) = nav.navigate(route) {
         popUpTo(Routes.CATALOG) { saveState = true }

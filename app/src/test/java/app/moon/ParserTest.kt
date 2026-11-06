@@ -144,6 +144,48 @@ class ParserTest {
     }
 
     @Test
+    fun menuLinksSmart() {
+        val html = """
+            <html><body>
+            <div class="topmenu">
+              <a href="/all_manga?yaoi&rowstart=30">Яой</a>
+              <a href="/tags/футанари">Футанари</a>
+              <a href="/bookmarks">Мои закладки</a>
+              <a href="/profile.php?lookup=5">Профиль</a>
+            </div>
+            <div class="sidebar"><a href="/tags/anal">anal</a><a href="/mangaka/Ivan">Ivan</a><a href="/top">Топ месяца</a></div>
+            </body></html>
+        """.trimIndent()
+        val links = NudeMoonParser.parseMenuLinks(Jsoup.parse(html, "$base/"))
+        assertEquals(
+            listOf("/all_manga?yaoi", "/tags/%D1%84%D1%83%D1%82%D0%B0%D0%BD%D0%B0%D1%80%D0%B8", "/bookmarks", "/profile.php?lookup=5", "/top"),
+            links.map { it.url },
+        )
+        assertTrue(NudeMoonParser.isAccountLink(links[3]))
+        assertTrue(NudeMoonParser.isBookmarksLink(links[2]))
+        assertTrue(!NudeMoonParser.isBookmarksLink(app.moon.data.Link("Добавить в закладки", "/x")))
+    }
+
+    @Test
+    fun genericListAndLoginState() {
+        val html = """
+            <html><body>
+            <div class="fav"><a href="/501--one.html" title="Один / One"><img src="/c/501.jpg"></a> <a href="/501--one.html">Один</a></div>
+            <ul><li><a href="/502--two.html">Два</a></li></ul>
+            <a href="/profile.php?lookup=ivan">Профиль</a> <a href="/setuser.php?logout=yes">Выход</a>
+            </body></html>
+        """.trimIndent()
+        val doc = Jsoup.parse(html, "$base/bookmarks")
+        val items = NudeMoonParser.parseListAny(doc).items
+        assertEquals(listOf("/501--one.html" to "Один", "/502--two.html" to "Два"), items.map { it.url to it.title })
+        assertEquals("$base/c/501.jpg", items[0].cover)
+        assertEquals(true, NudeMoonParser.pageLoggedIn(doc))
+        assertEquals("ivan", NudeMoonParser.username(doc))
+        val guest = Jsoup.parse("<form name='loginform'><input name='user_name'><input type='password' name='user_pass'></form>", base)
+        assertEquals(false, NudeMoonParser.pageLoggedIn(guest))
+    }
+
+    @Test
     fun tagsAndHelpers() {
         val doc = Jsoup.parse("<form><input name='tag[]' value=' анал '><input name='tag[]' value='big breasts'><input name='q' value='z'></form>", base)
         assertEquals(listOf("анал", "big breasts"), NudeMoonParser.parseTagList(doc))

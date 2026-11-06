@@ -35,9 +35,22 @@ class Library(private val store: JsonStore<LibraryData>) {
     val state get() = store.state
     val value get() = store.value
 
+    /** Пользователь добавил/убрал избранное в приложении — синхронизация отправит это на сайт. */
+    var onUserToggle: ((MangaItem, Boolean) -> Unit)? = null
+
     fun isFavorite(url: String) = store.value.favorites.any { it.manga.url == url }
 
-    fun toggleFavorite(item: MangaItem): Boolean {
+    /** Добавить без отправки на сайт (используется синхронизацией). */
+    fun addFavoriteSilently(item: MangaItem, added: Long = System.currentTimeMillis()) = store.update { d ->
+        if (d.favorites.any { it.manga.url == item.url }) d else d.copy(favorites = d.favorites + Favorite(item, added))
+    }
+
+    /** Убрать без отправки на сайт (используется синхронизацией). */
+    fun removeFavoriteSilently(url: String) = store.update { d -> d.copy(favorites = d.favorites.filterNot { it.manga.url == url }) }
+
+    fun toggleFavorite(item: MangaItem): Boolean = toggleLocal(item).also { onUserToggle?.invoke(item, it) }
+
+    private fun toggleLocal(item: MangaItem): Boolean {
         var added = false
         store.update { d ->
             if (d.favorites.any { it.manga.url == item.url }) {

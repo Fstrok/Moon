@@ -4,6 +4,7 @@ import app.moon.data.MangaDetails
 import app.moon.data.MangaPage
 import app.moon.data.Sort
 import app.moon.data.net.AuthRequiredException
+import app.moon.data.net.CookieMode
 import app.moon.data.net.HttpError
 import app.moon.data.net.await
 import kotlinx.coroutines.Dispatchers
@@ -31,8 +32,8 @@ class NudeMoonApi(
         else -> "$base/$pathOrUrl"
     }
 
-    suspend fun document(url: String): Document {
-        val resp = client.newCall(Request.Builder().url(url).build()).await()
+    suspend fun document(url: String, mode: CookieMode = CookieMode.NORMAL): Document {
+        val resp = client.newCall(Request.Builder().url(url).tag(CookieMode::class.java, mode).build()).await()
         return withContext(Dispatchers.IO) {
             resp.use {
                 if (!it.isSuccessful) throw HttpError(it.code, url)
@@ -68,8 +69,24 @@ class NudeMoonApi(
         }
     }
 
-    /** Любая страница-список сайта (автор, переводчик, тег): листаем по ссылке «>». */
-    suspend fun listing(url: String): MangaPage = NudeMoonParser.parseList(document(abs(url)))
+    /** Любая страница-список сайта (автор, переводчик, тег, раздел): листаем по ссылке «>». */
+    suspend fun listing(url: String): MangaPage = NudeMoonParser.parseListAny(document(abs(url)))
+
+    /** Сколько тайтлов в обычной вёрстке списка (table.news_pic2) на странице. */
+    suspend fun nativeCount(url: String): Int = NudeMoonParser.parseList(document(abs(url))).items.size
+
+    /** Все страницы списка (закладки и т.п.), не больше [maxPages]. */
+    suspend fun listingAll(url: String, maxPages: Int = 30): List<app.moon.data.MangaItem> {
+        val out = LinkedHashMap<String, app.moon.data.MangaItem>()
+        var next: String? = abs(url)
+        val seen = HashSet<String>()
+        while (next != null && seen.add(next) && seen.size <= maxPages) {
+            val page = NudeMoonParser.parseListAny(document(next))
+            page.items.forEach { out.putIfAbsent(it.url, it) }
+            next = page.nextUrl
+        }
+        return out.values.toList()
+    }
 
     suspend fun tagList(force: Boolean = false): List<String> {
         if (!force) tagsCache?.let { return it }

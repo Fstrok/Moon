@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Logout
 import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Category
 import androidx.compose.material.icons.outlined.DownloadForOffline
 import androidx.compose.material.icons.outlined.Fingerprint
@@ -105,7 +106,7 @@ fun MoreScreen() {
                             Text(
                                 when {
                                     autoLogin != null -> "Входим…"
-                                    loggedIn -> s.lastLogin.ifEmpty { "Вход на сайт выполнен" }
+                                    loggedIn -> cats.username ?: s.lastLogin.ifEmpty { "Вход на сайт выполнен" }
                                     else -> "Вход не выполнен"
                                 },
                                 style = MaterialTheme.typography.titleMedium,
@@ -156,13 +157,14 @@ fun MoreScreen() {
             }
             NavRow(
                 Icons.Outlined.Category,
-                if (catsRefreshing) "Категории сайта · обновляю…" else "Категории сайта · ${cats.list.size}",
-                "Берутся из меню сайта, обновляются при входе. Нажми, чтобы обновить сейчас",
-            ) { App.categories.refresh() }
+                if (catsRefreshing) "Разделы сайта · обновляю…" else "Разделы сайта · во вкладках ${cats.tabs.size}",
+                "Берутся из меню сайта, разделы для вошедших добавляются сами",
+            ) { nav.sections() }
             NavRow(Icons.Outlined.DownloadForOffline, "Загрузки", "Главы для чтения без интернета") { nav.downloads() }
             NavRow(Icons.Outlined.Sell, "Теги", "Подбор по нескольким тегам") { nav.tags() }
             NavRow(Icons.Outlined.Language, "Открыть сайт", "Комментарии, профиль и всё остальное") { nav.web(App.api.base + "/", WebMode.BROWSE) }
-            NavRow(Icons.Outlined.Settings, "Настройки", "Защита, читалка, вид") { nav.settings() }
+            NavRow(Icons.Outlined.Settings, "Настройки", "Защита, читалка, вид, синхронизация") { nav.settings() }
+            NavRow(Icons.Outlined.BugReport, "Диагностика сайта", "Если что-то не нашлось — отчёт для разработчика") { nav.diag() }
             Text(
                 "Moon ${BuildConfig.VERSION_NAME}",
                 style = MaterialTheme.typography.labelSmall,
@@ -276,6 +278,14 @@ fun SettingsScreen() {
             ChipsRow("Сортировка каталога", Sort.entries.map { it to it.label }, s.defaultSort) { v ->
                 App.settings.update { it.copy(defaultSort = v) }
             }
+
+            Header("Избранное")
+            val sync by App.siteFavorites.state.collectAsState()
+            SwitchRow(
+                "Синхронизировать с закладками сайта",
+                "В обе стороны: закладки сайта попадают в избранное, ♥ в приложении — в закладки сайта",
+                sync.enabled,
+            ) { v -> App.siteFavorites.setEnabled(v) }
 
             Header("Сайт")
             Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

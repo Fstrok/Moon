@@ -6,6 +6,7 @@ import android.graphics.Paint
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -144,7 +145,7 @@ class FlowTest {
             if (cond()) return
             Thread.sleep(100)
         }
-        error("условие не выполнилось за $timeoutMs мс; категории=" + App.categories.state.value + " reqs=" + server.requestCount)
+        error("условие не выполнилось за $timeoutMs мс; разделы=" + App.categories.state.value + " reqs=" + server.requestCount)
     }
 
     private fun waitText(text: String, timeout: Long = 10_000) {
@@ -195,8 +196,8 @@ class FlowTest {
             App.lock.unlock()
             App.categories.refresh()
         }
-        waitFor { App.categories.state.value.list.isNotEmpty() && !App.categories.refreshing.value }
-        check(App.categories.state.value.list.map { it.name } == listOf("Додзинси")) { App.categories.state.value.list.toString() }
+        waitFor { App.categories.state.value.tabs.isNotEmpty() && !App.categories.refreshing.value }
+        check(App.categories.state.value.tabs.map { it.name } == listOf("Додзинси")) { App.categories.state.value.toString() }
         waitText("Додзинси")
 
         // «вход»: сайт ставит cookie — приложение само пересобирает категории
@@ -204,7 +205,7 @@ class FlowTest {
             android.webkit.CookieManager.getInstance().setCookie(base, "fusion_user=42; Path=/")
             App.session.refresh()
         }
-        waitFor { App.categories.state.value.list.any { it.name == "Для своих" } }
+        waitFor { App.categories.state.value.tabs.any { it.name == "Для своих" } }
         check("/secret" in App.categories.state.value.fresh) { "новая категория не помечена" }
         waitText("Для своих")
         Thread.sleep(500)
@@ -212,13 +213,24 @@ class FlowTest {
         rule.onNodeWithText("Для своих").performClick()
         waitText("Тайтл номер 4")
 
+        rule.onNodeWithText("Ещё").performClick()
+        rule.onNodeWithText("Разделы сайта", substring = true).performClick()
+        waitText("Только после входа")
+        Thread.sleep(300)
+        shot("10_sections")
+        rule.onNodeWithContentDescription("Назад").performClick()
+        rule.onNodeWithText("Избранное").performClick()
+        waitText("Избранное · ")
+        Thread.sleep(300)
+        shot("11_library")
+
         // выход — категория пропадает
         rule.runOnUiThread {
             // заглушка CookieManager в Robolectric не удаляет просроченные cookie, поэтому сбрасываем все
             android.webkit.CookieManager.getInstance().removeAllCookies(null)
             App.session.refresh()
         }
-        waitFor { App.categories.state.value.list.none { it.name == "Для своих" } }
+        waitFor { App.categories.state.value.tabs.none { it.name == "Для своих" } }
     }
 
     @Test

@@ -20,6 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Sort
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.CloudOff
+import androidx.compose.material.icons.outlined.CloudSync
+import androidx.compose.material.icons.outlined.Sync
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -117,16 +123,18 @@ fun LibraryScreen() {
             )
         },
     ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize()) {
+        SyncBar()
         if (items.isEmpty()) {
             EmptyBox(
                 Icons.Outlined.FavoriteBorder,
                 if (library.favorites.isEmpty()) "Здесь будет избранное.\nДолгое нажатие на обложку или ♥ в карточке тайтла." else "Ничего не найдено",
-                Modifier.padding(pad).padding(top = 64.dp),
+                Modifier.padding(top = 64.dp),
             )
         } else {
             LazyVerticalGrid(
                 columns = gridCells(settings.gridColumns),
-                modifier = Modifier.padding(pad).fillMaxSize(),
+                modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
                 horizontalArrangement = spacedBy(10.dp),
                 verticalArrangement = spacedBy(8.dp),
@@ -146,6 +154,53 @@ fun LibraryScreen() {
                     )
                 }
             }
+        }
+        }
+    }
+}
+
+/** Состояние синхронизации избранного с закладками сайта. */
+@Composable
+private fun SyncBar() {
+    val nav = LocalNavigator.current
+    val sync by App.siteFavorites.state.collectAsState()
+    val progress by App.siteFavorites.progress.collectAsState()
+    val loggedIn by App.session.loggedIn.collectAsState()
+    if (!sync.enabled) return
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            if (sync.status != null) Icons.Outlined.CloudOff else Icons.Outlined.CloudSync,
+            null,
+            tint = if (sync.status != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            when {
+                !loggedIn -> "Войди — избранное синхронизируется с закладками сайта"
+                progress != null -> progress!!
+                sync.status != null -> sync.status!!
+                sync.lastSync > 0 -> "Синхронизировано с сайтом · на сайте ${sync.siteCount} · ${ago(sync.lastSync)}"
+                else -> "Избранное ещё не сверялось с сайтом"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.weight(1f).padding(vertical = 10.dp),
+            maxLines = 3,
+        )
+        if (!loggedIn) {
+            TextButton(onClick = { nav.login() }) { Text("Войти") }
+        } else if (progress != null) {
+            CircularProgressIndicator(Modifier.padding(12.dp).size(20.dp), strokeWidth = 2.dp)
+        } else {
+            IconButton(onClick = { App.siteFavorites.sync() }) { Icon(Icons.Outlined.Sync, "Синхронизировать") }
         }
     }
 }

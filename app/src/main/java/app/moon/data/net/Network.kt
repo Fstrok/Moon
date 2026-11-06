@@ -70,6 +70,36 @@ class CloudflareInterceptor : Interceptor {
     }
 }
 
+/** Как отправить cookies: обычно, «как гость» (без входа) или как десктоп (без мобильной вёрстки). */
+enum class CookieMode { NORMAL, GUEST, DESKTOP, GUEST_DESKTOP }
+
+/**
+ * Сетевой перехватчик: правит итоговый заголовок Cookie. Нужен, чтобы сравнить меню сайта
+ * у гостя и у вошедшего и найти разделы, которые открываются только после входа.
+ */
+class CookieModeInterceptor : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val req = chain.request()
+        val mode = req.tag(CookieMode::class.java) ?: CookieMode.NORMAL
+        if (mode == CookieMode.NORMAL) return chain.proceed(req)
+        val cookie = req.header("Cookie") ?: return chain.proceed(req)
+        val kept = cookie.split(';').map { it.trim() }.filter { c ->
+            val name = c.substringBefore('=')
+            val guestOk = !name.startsWith("fusion")
+            val desktopOk = name != "nm_mobile"
+            when (mode) {
+                CookieMode.GUEST -> guestOk
+                CookieMode.DESKTOP -> desktopOk
+                CookieMode.GUEST_DESKTOP -> guestOk && desktopOk
+                CookieMode.NORMAL -> true
+            }
+        }
+        val b = req.newBuilder()
+        if (kept.isEmpty()) b.removeHeader("Cookie") else b.header("Cookie", kept.joinToString("; "))
+        return chain.proceed(b.build())
+    }
+}
+
 suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     enqueue(object : Callback {
         override fun onResponse(call: Call, response: Response) {

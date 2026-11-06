@@ -49,11 +49,10 @@ fun CatalogScreen() {
     val nav = LocalNavigator.current
     var sort by rememberSaveable { mutableStateOf(App.settings.value.defaultSort) }
     val cats by App.categories.state.collectAsState()
-    val catsRefreshing by App.categories.refreshing.collectAsState()
     var selectedUrl by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(Unit) { App.categories.refreshIfStale() }
 
-    val tabs = remember(cats.list) { listOf(Link("Все", "")) + cats.list }
+    val tabs = remember(cats) { listOf(Link("Все", "")) + cats.tabs.map { Link(it.name, it.url) } }
     // категория пропала (например, после выхода) — возвращаемся во «Все»
     val selected = tabs.firstOrNull { it.url == selectedUrl } ?: tabs.first()
 
@@ -121,27 +120,7 @@ fun CatalogScreen() {
                     }
                 }
             } else {
-                val vm: ListingViewModel = viewModel(key = "cat-${selected.url}") { ListingViewModel(Source.Url(selected.url, selected.name)) }
-                val st by vm.state.collectAsState()
-                PullToRefreshBox(
-                    isRefreshing = st.refreshing || catsRefreshing && st.items.isEmpty(),
-                    onRefresh = {
-                        vm.refresh()
-                        App.categories.refresh()
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    key(selected.url) {
-                        MangaGrid(
-                            items = st.items,
-                            loading = st.loading && !st.refreshing,
-                            error = st.error,
-                            endReached = st.endReached,
-                            onLoadMore = vm::loadMore,
-                            onRetry = vm::retry,
-                        )
-                    }
-                }
+                SectionContent(selected.url, selected.name)
             }
         }
     }
@@ -152,8 +131,6 @@ fun CatalogScreen() {
 fun ListingScreen(source: Source) {
     val nav = LocalNavigator.current
     var current by rememberSaveable(stateSaver = SourceSaver) { mutableStateOf(source) }
-    val vm: ListingViewModel = viewModel(key = "listing-${current.hashCode()}") { ListingViewModel(current) }
-    val st by vm.state.collectAsState()
     val title = when (val s = current) {
         is Source.Catalog -> "Каталог"
         is Source.Tags -> s.tags.joinToString(" + ")
@@ -172,6 +149,13 @@ fun ListingScreen(source: Source) {
             (current as? Source.Tags)?.let { t ->
                 SortChips(t.sort, { current = t.copy(sort = it) }, Modifier.padding(bottom = 4.dp))
             }
+            val u = current as? Source.Url
+            if (u != null) {
+                SectionContent(u.url, u.title)
+                return@Column
+            }
+            val vm: ListingViewModel = viewModel(key = "listing-${current.hashCode()}") { ListingViewModel(current) }
+            val st by vm.state.collectAsState()
             PullToRefreshBox(isRefreshing = st.refreshing, onRefresh = vm::refresh, modifier = Modifier.fillMaxSize()) {
                 key(current) {
                     MangaGrid(

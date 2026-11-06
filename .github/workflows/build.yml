@@ -26,22 +26,22 @@ jobs:
       - name: Build release APK
         env:
           VERSION_CODE: ${{ github.run_number }}
-          VERSION_NAME: 1.0.${{ github.run_number }}
+          VERSION_NAME: 1.1.${{ github.run_number }}
         run: |
-          # versionCode = номер сборки + 1, чтобы APK из CI ставился поверх локальной сборки (versionCode 1)
-          export VERSION_CODE=$((VERSION_CODE + 1))
+          # versionCode = номер сборки + 100, чтобы APK из CI ставился поверх локальных сборок
+          export VERSION_CODE=$((VERSION_CODE + 100))
           ./gradlew --no-daemon :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk Moon-$VERSION_NAME.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Moon-1.0.${{ github.run_number }}
+          name: Moon-1.1.${{ github.run_number }}
           path: Moon-*.apk
 
       - name: Release
         if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Moon 1.0.${{ github.run_number }}
+          tag_name: v1.1.${{ github.run_number }}
+          name: Moon 1.1.${{ github.run_number }}
           files: Moon-*.apk

@@ -8,3 +8,5 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
+# все @Serializable-классы приложения (JSON-хранилища, ответы JS)
+-keep @kotlinx.serialization.Serializable class app.moon.** { *; }

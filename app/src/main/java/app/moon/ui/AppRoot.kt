@@ -54,11 +54,14 @@ import app.moon.ui.screens.HistoryScreen
 import app.moon.ui.screens.LibraryScreen
 import app.moon.ui.screens.ListingScreen
 import app.moon.ui.screens.LoginScreen
+import app.moon.ui.screens.SectionsScreen
+import app.moon.ui.screens.DiagnosticsScreen
 import app.moon.ui.screens.MoreScreen
 import app.moon.ui.screens.SearchScreen
 import app.moon.ui.screens.SettingsScreen
 import app.moon.ui.screens.TagsScreen
 import app.moon.ui.web.AutoLoginHost
+import app.moon.ui.web.SiteActionHostIfNeeded
 import app.moon.ui.web.WebScreen
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector, val selectedIcon: ImageVector)
@@ -130,6 +133,8 @@ fun AppRoot(deepLink: String?, onDeepLinkHandled: () -> Unit) {
                     composable(Routes.DOWNLOADS) { DownloadsScreen() }
                     composable(Routes.SETTINGS) { SettingsScreen() }
                     composable(Routes.LOGIN) { LoginScreen() }
+                    composable(Routes.SECTIONS) { SectionsScreen() }
+                    composable(Routes.DIAG) { DiagnosticsScreen() }
                     composable(Routes.LISTING, listOf(strArg("src"))) { e ->
                         val raw = e.arguments?.getString("src").orEmpty()
                         val src = runCatching { AppJson.decodeFromString(Source.serializer(), raw) }
@@ -154,6 +159,7 @@ fun AppRoot(deepLink: String?, onDeepLinkHandled: () -> Unit) {
                 }
             }
             AutoLoginHost()
+            SiteActionHostIfNeeded()
             if (locked) LockScreen()
         }
     }

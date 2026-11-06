@@ -149,37 +149,139 @@ object NudeMoonParser {
         return fromScripts.distinct()
     }
 
-    private val MENU_EXCLUDE = listOf(
-        "/tags", "mangaka", "perevod", "profile", "login", "logout", "register", "setuser", "lostpassword",
-        "password", "messages", "forum", "rules", "contact", "faq", "search", "members", "edit_profile",
-        "submit", "readmore", "rss", "/user", "upload", "comments", "print.php", "javascript:", "mailto:",
-        "/all_manga", "rowstart=", "#",
+    /** Служебные ссылки: никогда не разделы. */
+    private val JUNK = listOf(
+        "login", "logout", "register", "setuser", "lostpassword", "password", "rss", "print.php",
+        "javascript:", "mailto:", "/rules", "contact", "faq",
     )
 
+    /** Ссылки аккаунта: появляются после входа, но это не разделы с мангой. */
+    private val ACCOUNT_RE = Regex(
+        """profile|edit_profile|messages|/pm\b|notif|settings|logout|setuser|""" +
+            """профиль|сообщени|настройк|уведомлен|выход|выйти|личн""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val SORT_KEYS = setOf("date", "views", "like", "com", "pages")
+    const val MENU_CONTAINER = "nav, header, [id*=menu], [class*=menu], [id*=nav], [class*=nav], [class*=header], [id*=header]"
+    private val SPECIFIC_PAGE = Regex("""^/(tags?|mangaka|perevod)/[^/]+""")
+    private val MANGA_PATH = Regex("""/[^/]*--[^/]+\.html$""")
+    val BOOKMARKS_RE = Regex("""закладк|избранн|bookmark|favou?rit""", RegexOption.IGNORE_CASE)
+
+    /** HTML блоков меню (для отчёта диагностики), без скриптов. */
+    fun menuHtml(doc: Document, limit: Int = 5000): String {
+        val copy = doc.clone()
+        copy.select("script, style, noscript, svg").remove()
+        val blocks = copy.select(MENU_CONTAINER).filter { el -> el.parents().none { it.`is`(MENU_CONTAINER) } }
+        return blocks.joinToString("\n") { it.outerHtml() }.take(limit)
+    }
+
+    /** Элементы, похожие на кнопки закладок (статический поиск для отчёта). */
+    fun bookmarkControlsHtml(doc: Document): List<String> =
+        doc.select("a, button, input, [onclick], img, span, i, div[title]").filter { el ->
+            val hay = el.ownText() + " " + el.attr("title") + " " + el.attr("alt") + " " + el.attr("value") + " " +
+                el.attr("href") + " " + el.attr("onclick") + " " + el.id() + " " + el.className()
+            BOOKMARKS_RE.containsMatchIn(hay) && el.parents().none { it.hasClass("tag-links") }
+        }.take(12).map { it.outerHtml().replace(Regex("\\s+"), " ").take(400) }
+
+    fun isMangaPath(path: String): Boolean = MANGA_PATH.containsMatchIn(path)
+
+    fun isAccountLink(l: Link): Boolean = ACCOUNT_RE.containsMatchIn(l.name) || ACCOUNT_RE.containsMatchIn(l.url)
+
+    fun isBookmarksLink(l: Link): Boolean =
+        (BOOKMARKS_RE.containsMatchIn(l.name) || BOOKMARKS_RE.containsMatchIn(l.url)) &&
+            !l.name.contains("добав", true) && !l.url.contains("add", true)
+
+    /** Убирает пагинацию из ссылки, чтобы /x?rowstart=30 и /x считались одним разделом. */
+    private fun normalize(href: String): String? {
+        val u = href.toHttpUrlOrNull() ?: return null
+        val q = u.encodedQuery?.split('&')?.filterNot { it.startsWith("rowstart=") }?.joinToString("&")?.ifEmpty { null }
+        return u.encodedPath + (q?.let { "?$it" } ?: "")
+    }
+
     /**
-     * Ссылки-кандидаты в категории: все внутренние ссылки страницы, кроме карточек тайтлов,
-     * тегов/авторов/служебных страниц. Какие из них реально списки манги — проверяет [app.moon.data.store.Categories].
+     * Ссылки-кандидаты в разделы: внутренние ссылки страницы без карточек тайтлов и служебных страниц.
+     * Ссылки из меню (nav, header, блоки с menu в классе) идут первыми. Какие из них списки манги — решает [app.moon.data.store.Categories].
      */
     fun parseMenuLinks(doc: Document): List<Link> {
         val host = doc.location().toHttpUrlOrNull()?.host?.removePrefix("www.") ?: return emptyList()
-        val out = LinkedHashMap<String, Link>()
+        val menu = LinkedHashMap<String, Link>()
+        val other = LinkedHashMap<String, Link>()
         for (a in doc.select("a[href]")) {
+            val raw = a.attr("href").trim()
+            if (raw.isEmpty() || raw.startsWith("#")) continue
             if (a.parents().any { it.hasClass("news_pic2") || it.tagName() == "footer" }) continue
             val href = a.absUrl("href")
             val u = href.toHttpUrlOrNull() ?: continue
             if (u.host.removePrefix("www.") != host) continue
             val p = u.encodedPath
             if (p == "/" || p.endsWith("/index.php") || (p.endsWith("/news.php") && u.encodedQuery == null)) continue
-            if (p.endsWith(".html") && p.contains("--")) continue
-            if (IMG_EXT.containsMatchIn(p)) continue
+            if (MANGA_PATH.containsMatchIn(p) || IMG_EXT.containsMatchIn(p)) continue
+            if (p.trimEnd('/') == "/tags") continue
             val low = href.lowercase()
-            if (MENU_EXCLUDE.any { low.contains(it) }) continue
+            if (JUNK.any { low.contains(it) }) continue
+            // каталог с одной лишь сортировкой — это вкладка «Все»
+            if (p.startsWith("/all_manga")) {
+                val keys = u.encodedQuery?.split('&')?.map { it.substringBefore('=') }?.filterNot { it == "rowstart" }.orEmpty()
+                if (keys.all { it in SORT_KEYS }) continue
+            }
             val text = a.text().trim().ifEmpty { a.attr("title").trim() }
             if (text.length !in 2..40 || text.none { it.isLetter() }) continue
-            val key = path(href)
-            if (key !in out) out[key] = Link(text, key)
+            val inMenu = a.closest(MENU_CONTAINER) != null
+            // отдельный тег/автор/переводчик — раздел, только если стоит в меню (не облако тегов в сайдбаре)
+            if (SPECIFIC_PAGE.containsMatchIn(p) && !inMenu) continue
+            val key = normalize(href) ?: continue
+            if (key in menu || key in other) continue
+            (if (inMenu) menu else other)[key] = Link(text, key)
         }
-        return out.values.toList()
+        return menu.values.toList() + other.values.toList()
+    }
+
+    /**
+     * Универсальный разбор списка: все ссылки на тайтлы (…--….html) со своими обложками.
+     * Нужен для разделов со своей вёрсткой (например, закладки), где нет table.news_pic2.
+     */
+    fun parseGenericList(doc: Document): List<MangaItem> {
+        val host = doc.location().toHttpUrlOrNull()?.host?.removePrefix("www.")
+        val out = LinkedHashMap<String, MangaItem>()
+        for (a in doc.select("a[href]")) {
+            val href = a.absUrl("href")
+            val u = href.toHttpUrlOrNull() ?: continue
+            if (host != null && u.host.removePrefix("www.") != host) continue
+            if (!MANGA_PATH.containsMatchIn(u.encodedPath)) continue
+            val img = a.selectFirst("img")
+            val title = cleanTitle(
+                a.attr("title").ifBlank { a.text() }.ifBlank { img?.attr("alt").orEmpty() }.ifBlank { img?.attr("title").orEmpty() },
+            )
+            val key = path(href)
+            val prev = out[key]
+            val cover = prev?.cover ?: imageSrc(img)
+            val name = prev?.title?.ifBlank { null } ?: title
+            out[key] = MangaItem(url = key, title = name, cover = cover)
+        }
+        return out.values.filter { it.title.isNotBlank() }
+    }
+
+    /** Сначала обычная вёрстка списков, если её нет — универсальный разбор. */
+    fun parseListAny(doc: Document): MangaPage {
+        val page = parseList(doc)
+        if (page.items.isNotEmpty()) return page
+        return MangaPage(parseGenericList(doc), page.hasNext, page.nextUrl)
+    }
+
+    /** Имя пользователя из ссылки «Профиль» (как в парсере Kotatsu) или null. */
+    fun username(doc: Document): String? =
+        doc.getElementsContainingOwnText("Профиль").firstOrNull { it.hasAttr("href") }
+            ?.attr("href")?.trimEnd('/')?.substringAfterLast('/')?.substringAfterLast('=')?.ifBlank { null }
+
+    /** Абсолютная ссылка «Профиль» или null. */
+    fun profileUrl(doc: Document): String? =
+        doc.getElementsContainingOwnText("Профиль").firstOrNull { it.hasAttr("href") }?.absUrl("href")?.ifBlank { null }
+
+    /** По странице: true — вошли, false — гость (есть форма входа), null — непонятно. */
+    fun pageLoggedIn(doc: Document): Boolean? = when {
+        doc.selectFirst("form[name=loginform], input[name=user_pass]") != null -> false
+        doc.selectFirst("a[href*=logout]") != null || username(doc) != null -> true
+        else -> null
     }
 
     private val IMG_EXT = Regex("""\.(?:jpe?g|png|webp|gif)(?:\?|$)""", RegexOption.IGNORE_CASE)
